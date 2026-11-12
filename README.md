@@ -10,8 +10,22 @@ Requires [uv](https://docs.astral.sh/uv/) and Python 3.10+.
 
 ```sh
 uv run python scrape_gratka.py --phones   # scrape Gratka into gratka_listings.json + listings.db
+uv run python scrape.py universum         # add an agency site (see Connectors)
 uv run python app.py                      # open http://127.0.0.1:8000
 ```
+
+## Connectors (`connectors/`, `scrape.py`) — agency sites
+
+A connector is one small module per site with a single `scrape()` function that returns a list of listing dicts (the contract is described in `connectors/__init__.py`). `scrape.py` runs it and stores the result in `listings.db` under the module's name:
+
+```sh
+uv run python scrape.py universum   # no name = list available connectors
+```
+
+- **Universum (`connectors/universum.py`)** — houses for sale in Szczecin from <https://www.universum.nieruchomosci.pl>. Plain HTTP, one request per second; reads each offer page for the full description, plot area, and the agent's name and phone. About 20 offers, under a minute.
+- To add a site, copy `universum.py`, adapt the parsing, and add a test like `test_universum.py`. If a scrape fails or finds nothing, the database is left untouched.
+
+Gratka still uses its own script (below) and is not a connector yet.
 
 ## Gratka scraper (`scrape_gratka.py`) — main source
 
@@ -63,4 +77,4 @@ Duplicates: the same house can appear under several IDs (re-posted, or listed by
 uv run --with-requirements requirements.txt python -m unittest -v
 ```
 
-Covers the Adresowo scraper only; Gratka, the database and the web page have no automated tests yet.
+Covers the Adresowo scraper and the Universum connector; Gratka, the database and the web page have no automated tests yet.
