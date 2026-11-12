@@ -8,3 +8,4 @@ olx_listings.json
 gratka_listings.json
 listings.db
 .env
+.claude/
