@@ -25,7 +25,7 @@ uv run python scrape.py universum   # no name = list available connectors
 - **Universum (`connectors/universum.py`)** — houses for sale in Szczecin from <https://www.universum.nieruchomosci.pl>. Plain HTTP, one request per second; reads each offer page for the full description, plot area, and the agent's name and phone. About 20 offers, under a minute.
 - To add a site, copy `universum.py`, adapt the parsing, and add a test like `test_universum.py`. If a scrape fails or finds nothing, the database is left untouched.
 
-Gratka still uses its own script (below) and is not a connector yet.
+Gratka is also available as a connector; its original script (below) still works.
 
 ## Gratka scraper (`scrape_gratka.py`) — main source
 
@@ -86,4 +86,45 @@ On a listing card, **Do zadzwonienia** queues the listing with a list of questio
 uv run --with-requirements requirements.txt python -m unittest -v
 ```
 
-Covers the Adresowo scraper, the Universum connector, the database, the calls (with a fake Claude client and mocked ElevenLabs) and the calls API. Gratka and the Claude matcher have no automated tests yet.
+Covers Adresowo, Universum, connector discovery and imports, the database, and the call workflow and API with mocked services.
+
+## Konektory źródeł
+
+Wspólny runner automatycznie wykrywa moduły w `connectors/`:
+
+```sh
+uv run python scrape.py --list
+uv run python scrape.py gratka --max-pages 1 --output data/gratka-preview.json
+uv run python scrape.py gratka --phones
+```
+
+Ostatnia komenda importuje pełny wynik do istniejącej bazy; aplikacja pokazuje
+oferty wszystkich źródeł. Dotychczasowe `scrape_gratka.py` nadal działa.
+Runner obsługuje również `--database FILE` do pracy na osobnej bazie.
+Pliki wynikowe zawierające kontakty zapisuj w ignorowanym `data/`.
+
+Dodanie biura:
+
+1. Utwórz `connectors/nazwa_biura.py`, eksportujący obiekt `connector`.
+2. Zaimplementuj interfejs `Connector` z `connectors/__init__.py`: stałe
+   `name`, `description` oraz `scrape(max_pages=None, phones=False)`.
+3. Zwróć `ScrapeResult(records, complete)`. Każdy rekord musi mieć stabilne
+   `id` i `url`; pozostałe pola mają format Gratki (`title`, `price_pln`,
+   `area_m2`, `rooms`, `location`, `image_url`, `description`, `agency`,
+   `agent`, `phone`). `name` jest trwałym kluczem źródła w SQLite.
+4. Ogranicz dane do **domów na sprzedaż w Szczecinie**, sprawdź paginację
+   i przypisuj telefon do właściwej oferty. `complete=True` oznacza, że
+   pobrano wszystkie strony tego zakresu. Limit stron, błąd pobrania lub
+   nierozpoznany HTML nie mogą oznaczać kompletnego przebiegu.
+5. Dodaj testy parsera oparte na rzeczywistym HTML oraz test paginacji.
+   Nowy moduł zostanie wykryty bez zmian runnera i bazy.
+
+Tylko kompletny, niepusty i poprawny wynik aktualizuje bazę oraz oznacza
+zniknięte oferty **danego źródła**. Przebieg częściowy może zapisać JSON,
+ale nie zmienia bazy. Błędy pobierania i walidacji pozostawiają poprzednie dane.
+JSON jest zapisywany atomowo, osobno od transakcji SQLite; błąd zapisu JSON
+po imporcie nie cofa udanej transakcji bazy.
+
+Moduły z PR #1 eksportujące `scrape() -> list[dict]` są nadal wykrywane pod nazwą modułu. Muszą zwracać kompletny wynik albo zgłaszać błąd. Obsługują kontakty w ramach pełnego pobrania; `--max-pages` wymaga nowego interfejsu `Connector`. Universum odrzuca wyniki przekraczające limit stron. Runner przyjmuje wiele źródeł (`uv run python scrape.py universum gratka`) i kontynuuje po błędzie pojedynczego źródła. `--output` jest dostępne tylko dla jednego źródła. Brak argumentów lub `--list` pokazuje listę konektorów.
+
+Konektor Świat Nieruchomości nie jest jeszcze zaimplementowany.

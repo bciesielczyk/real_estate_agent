@@ -74,6 +74,8 @@ def scrape():
             raise ValueError(f"No offers on results page {page}; refusing to save incomplete results")
         codes += [code for code in found if code not in codes]
         total = max(total, last_page(results))
+        if total > MAX_PAGES:
+            raise ValueError(f"Results exceed {MAX_PAGES} pages; refusing an incomplete snapshot")
         print(f"Page {page}/{total}: {len(found)} offers")
         page += 1
     records = []
