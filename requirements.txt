@@ -1,0 +1,4 @@
+beautifulsoup4>=4.12,<5
+playwright>=1.55,<2
+anthropic>=1,<2
+pydantic>=2,<3

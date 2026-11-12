@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ogłoszenia — Szczecin</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e3df; --accent:#0b6e4f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, -apple-system, sans-serif; background:var(--bg); color:var(--ink); }
+  header { position:sticky; top:0; z-index:1; background:var(--bg); border-bottom:1px solid var(--line);
+           padding:14px 20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+  h1 { font-size:18px; margin:0 auto 0 0; }
+  select, label { font:inherit; color:var(--muted); }
+  main { padding:20px; display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; }
+  .card.inactive { opacity:.5; }
+  .card img { width:100%; aspect-ratio:3/2; object-fit:cover; background:var(--line); display:block; }
+  .body { padding:12px 14px 14px; display:flex; flex-direction:column; gap:6px; flex:1; }
+  .price { font-size:19px; font-weight:650; }
+  .facts { color:var(--muted); }
+  .title { font-weight:550; color:inherit; text-decoration:none; }
+  .title:hover { text-decoration:underline; }
+  .contact { margin-top:auto; padding-top:8px; border-top:1px solid var(--line); font-size:14px; }
+  .contact a { color:var(--accent); font-weight:600; text-decoration:none; }
+  .meta { font-size:12px; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; }
+  .badge { background:#e6f2ec; color:var(--accent); border-radius:4px; padding:0 6px; font-weight:600; }
+  .badge.gone { background:#f3e3e3; color:#9b2c2c; }
+  #status { grid-column:1/-1; color:var(--muted); }
+  #search { padding:14px 20px 0; display:flex; flex-direction:column; gap:8px; max-width:900px; }
+  #search textarea { font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px; resize:vertical; min-height:64px; background:#fff; }
+  #search .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.6; cursor:wait; }
+  #summary { color:var(--muted); }
+  #summary.error { color:#9b2c2c; }
+  .why { background:#f0f6f3; border-left:3px solid var(--accent); padding:6px 10px; font-size:14px; border-radius:4px; }
+  .score { font-weight:700; color:var(--accent); }
+  #usage { color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Domy na sprzedaż — Szczecin <span id="count"></span></h1>
+  <select id="sort">
+    <option value="new">Najnowsze</option>
+    <option value="price_asc">Cena rosnąco</option>
+    <option value="price_desc">Cena malejąco</option>
+    <option value="area_desc">Powierzchnia malejąco</option>
+    <option value="ppm_asc">Cena za m² rosnąco</option>
+  </select>
+  <label><input type="checkbox" id="inactive"> pokaż zniknięte</label>
+</header>
+<form id="search">
+  <textarea id="criteria" placeholder="Opisz, czego szukasz, np.: dom do 1,2 mln zł, min. 120 m², z ogrodem, w spokojnej okolicy, do zamieszkania od razu"></textarea>
+  <div class="row">
+    <button type="submit" id="go">Wybierz pasujące</button>
+    <button type="button" id="clear" class="secondary" hidden>Pokaż wszystkie</button>
+    <span id="summary"></span>
+  </div>
+  <small id="usage"></small>
+</form>
+<main id="list"><p id="status">Ładowanie…</p></main>
+
+<script>
+const fmt = new Intl.NumberFormat("pl-PL");
+const list = document.getElementById("list");
+let listings = [];
+let matches = null; // Map id -> {score, reason} when Claude results are shown
+
+const sorters = {
+  new: (a, b) => b.first_seen.localeCompare(a.first_seen),
+  price_asc: (a, b) => (a.price_pln ?? Infinity) - (b.price_pln ?? Infinity),
+  price_desc: (a, b) => (b.price_pln ?? -1) - (a.price_pln ?? -1),
+  area_desc: (a, b) => (b.area_m2 ?? -1) - (a.area_m2 ?? -1),
+  ppm_asc: (a, b) => ppm(a) - ppm(b),
+};
+function ppm(l) { return l.price_pln && l.area_m2 ? l.price_pln / l.area_m2 : Infinity; }
+
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children.filter(c => c != null && c !== ""));
+  return node;
+}
+
+function card(l) {
+  const isNew = Date.now() - new Date(l.first_seen) < 2 * 86400e3;
+  const facts = [
+    l.area_m2 && `${fmt.format(l.area_m2)} m²`,
+    l.rooms && `${l.rooms} pok.`,
+    isFinite(ppm(l)) && `${fmt.format(Math.round(ppm(l)))} zł/m²`,
+  ].filter(Boolean).join(" · ");
+  const who = [l.agent, l.agency && l.agency !== l.agent ? l.agency : null].filter(Boolean).join(", ");
+  const match = matches?.get(l.id);
+  return el("article", { className: "card" + (l.active ? "" : " inactive") },
+    l.image_url ? el("img", { src: l.image_url, alt: "", loading: "lazy" }) : null,
+    el("div", { className: "body" },
+      match ? el("div", { className: "why" }, el("span", { className: "score" }, `${match.score}/10 `), match.reason) : null,
+      el("div", { className: "price" }, l.price_pln ? `${fmt.format(l.price_pln)} zł` : "Cena do negocjacji"),
+      el("div", { className: "facts" }, facts),
+      el("a", { className: "title", href: l.url, target: "_blank", rel: "noopener" }, l.title || "Ogłoszenie"),
+      el("div", { className: "facts" }, l.location || ""),
+      el("div", { className: "contact" },
+        who ? el("div", {}, who) : null,
+        l.phone ? el("a", { href: "tel:" + l.phone }, l.phone) : el("span", { className: "facts" }, "brak numeru")),
+      el("div", { className: "meta" },
+        isNew ? el("span", { className: "badge" }, "nowe") : null,
+        l.active ? null : el("span", { className: "badge gone" }, "zniknęło"),
+        el("span", {}, l.source),
+        el("span", {}, "od " + new Date(l.first_seen).toLocaleDateString("pl-PL"))),
+    ));
+}
+
+function render() {
+  let shown = [...listings].sort(sorters[document.getElementById("sort").value]);
+  if (matches) shown = listings.filter(l => matches.has(l.id)).sort((a, b) => matches.get(b.id).score - matches.get(a.id).score);
+  document.getElementById("sort").disabled = !!matches;
+  document.getElementById("count").textContent = matches ? `(${shown.length} z ${listings.length})` : `(${shown.length})`;
+  list.replaceChildren(...(shown.length ? shown.map(card) : [el("p", { id: "status" }, matches ? "Nic nie pasuje do kryteriów." : "Brak ogłoszeń.")]));
+}
+
+const summary = document.getElementById("summary");
+const usage = document.getElementById("usage");
+function usageText(result) {
+  const u = result.usage;
+  const read = u.cache_read_input_tokens || 0, written = u.cache_creation_input_tokens || 0;
+  const notes = [read && `z cache: ${fmt.format(read)}`, written && `zapis do cache: ${fmt.format(written)}`].filter(Boolean);
+  return `Zużycie: ${fmt.format(u.input_tokens + read + written)} tokenów wejścia`
+    + (notes.length ? ` (${notes.join(", ")})` : "")
+    + `, ${fmt.format(u.output_tokens)} wyjścia · ${result.model}`;
+}
+document.getElementById("search").addEventListener("submit", async event => {
+  event.preventDefault();
+  const criteria = document.getElementById("criteria").value.trim();
+  if (!criteria) return;
+  const go = document.getElementById("go");
+  go.disabled = true; go.textContent = "Claude wybiera…";
+  summary.className = ""; summary.textContent = "To może potrwać do minuty."; usage.textContent = "";
+  try {
+    const response = await fetch("/api/match", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ criteria }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || response.statusText);
+    matches = new Map(result.matches.map(m => [m.id, m]));
+    summary.textContent = result.summary;
+    usage.textContent = usageText(result);
+    document.getElementById("clear").hidden = false;
+    render();
+  } catch (error) {
+    summary.className = "error"; summary.textContent = "Błąd: " + error.message;
+  } finally {
+    go.disabled = false; go.textContent = "Wybierz pasujące";
+  }
+});
+document.getElementById("clear").addEventListener("click", () => {
+  matches = null; summary.textContent = ""; usage.textContent = ""; document.getElementById("clear").hidden = true; render();
+});
+
+async function load() {
+  const inactive = document.getElementById("inactive").checked ? "1" : "0";
+  try {
+    const response = await fetch(`/api/listings?inactive=${inactive}`);
+    if (!response.ok) throw new Error(await response.text());
+    listings = await response.json();
+    render();
+  } catch (error) {
+    list.replaceChildren(el("p", { id: "status" }, "Nie udało się wczytać ogłoszeń: " + error.message));
+  }
+}
+
+document.getElementById("sort").addEventListener("change", render);
+document.getElementById("inactive").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>

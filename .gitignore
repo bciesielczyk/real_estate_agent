@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.auth/
+listings.json
+data/
+olx_listings.json
+gratka_listings.json
+listings.db
+.env
