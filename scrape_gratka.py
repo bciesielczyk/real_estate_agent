@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from connectors import normalize_phone
+
 URL = "https://gratka.pl/nieruchomosci/domy/szczecin"
 MAX_PAGE = 10  # robots.txt allows ?page=2..10 only
 HEADERS = {"User-Agent": "GratkaScraper/1.0 (personal use)"}
@@ -36,17 +38,6 @@ def number(value):
         return float(value) if value not in (None, "") else None
     except (TypeError, ValueError):
         return None
-
-
-def normalize_phone(text):
-    phone = re.sub(r"[^\d+]", "", text or "")
-    if phone.startswith("00"):
-        phone = "+" + phone[2:]
-    elif re.fullmatch(r"\d{9}", phone):
-        phone = "+48" + phone
-    elif re.fullmatch(r"48\d{9}", phone):
-        phone = "+" + phone
-    return phone if re.fullmatch(r"\+[1-9]\d{7,14}", phone) else None
 
 
 def parse_list(html):

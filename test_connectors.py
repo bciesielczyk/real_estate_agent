@@ -3,11 +3,13 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from connectors import universum
 
-from connectors import ScrapeResult, available
+from connectors import ScrapeResult, available, ModuleConnector
 from connectors.gratka import connector as gratka
 from db import connect, save_listings
-from scrape import run
+from scrape import run, main
 
 
 class ConnectorTests(unittest.TestCase):
@@ -63,3 +65,49 @@ class ConnectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run(self.plugin, max_pages=0)
         self.plugin.scrape.assert_not_called()
+
+
+class PR1CompatibilityTests(unittest.TestCase):
+    def test_legacy_module_is_discovered_and_imported(self):
+        plugin = available()['universum']
+        self.assertIsInstance(plugin, ModuleConnector)
+        record = {'id': 'UNI-1', 'url': 'https://example.test/1'}
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'listings.db'
+            with patch.object(universum, 'scrape', return_value=[record]) as fetch:
+                result = run(plugin, database=database, phones=True)
+                fetch.assert_called_once_with()
+            self.assertTrue(result.complete)
+            with connect(database) as connection:
+                self.assertEqual(connection.execute('SELECT source,id FROM listings').fetchone()[:],
+                                 ('universum', 'UNI-1'))
+
+    def test_legacy_limit_is_rejected_before_fetch(self):
+        module = SimpleNamespace(scrape=Mock())
+        with self.assertRaises(ValueError):
+            ModuleConnector(module, 'legacy').scrape(max_pages=1)
+        module.scrape.assert_not_called()
+
+    def test_multiple_sources_continue_after_failure(self):
+        bad, good = Mock(), Mock()
+        with patch('scrape.available', return_value={'bad': bad, 'good': good}), \
+             patch('scrape.run', side_effect=[OSError('offline'), ScrapeResult([{}], True)]) as execute:
+            with self.assertRaises(SystemExit) as exit_status:
+                main(['bad', 'good'])
+        self.assertEqual(exit_status.exception.code, 1)
+        self.assertEqual([call.args[0] for call in execute.call_args_list], [bad, good])
+
+    def test_shared_output_rejected_before_any_scrape(self):
+        with patch('scrape.available', return_value={'a': Mock(), 'b': Mock()}), \
+             patch('scrape.run') as execute, self.assertRaises(SystemExit):
+            main(['a', 'b', '--output', 'snapshot.json'])
+        execute.assert_not_called()
+
+    def test_universum_excess_pages_cannot_import_partial_snapshot(self):
+        with patch.object(universum, 'fetch', return_value='results'), \
+             patch.object(universum, 'parse_codes', return_value=['UNI-1']), \
+             patch.object(universum, 'last_page', return_value=universum.MAX_PAGES + 1), \
+             patch.object(universum, 'parse_offer') as parse:
+            with self.assertRaises(ValueError):
+                universum.scrape()
+        parse.assert_not_called()

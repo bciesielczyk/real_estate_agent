@@ -10,8 +10,22 @@ Requires [uv](https://docs.astral.sh/uv/) and Python 3.10+.
 
 ```sh
 uv run python scrape_gratka.py --phones   # scrape Gratka into gratka_listings.json + listings.db
+uv run python scrape.py universum         # add an agency site (see Connectors)
 uv run python app.py                      # open http://127.0.0.1:8000
 ```
+
+## Connectors (`connectors/`, `scrape.py`) — agency sites
+
+A connector is one small module per site with a single `scrape()` function that returns a list of listing dicts (the contract is described in `connectors/__init__.py`). `scrape.py` runs it and stores the result in `listings.db` under the module's name:
+
+```sh
+uv run python scrape.py universum   # no name = list available connectors
+```
+
+- **Universum (`connectors/universum.py`)** — houses for sale in Szczecin from <https://www.universum.nieruchomosci.pl>. Plain HTTP, one request per second; reads each offer page for the full description, plot area, and the agent's name and phone. About 20 offers, under a minute.
+- To add a site, copy `universum.py`, adapt the parsing, and add a test like `test_universum.py`. If a scrape fails or finds nothing, the database is left untouched.
+
+Gratka is also available as a connector; its original script (below) still works.
 
 ## Gratka scraper (`scrape_gratka.py`) — main source
 
@@ -63,16 +77,16 @@ Duplicates: the same house can appear under several IDs (re-posted, or listed by
 uv run --with-requirements requirements.txt python -m unittest -v
 ```
 
-Covers the Adresowo scraper only; Gratka, the database and the web page have no automated tests yet.
+Covers Adresowo, Universum, connector discovery and imports, the database, and the call workflow with mocked services.
 
 ## Konektory źródeł
 
 Wspólny runner automatycznie wykrywa moduły w `connectors/`:
 
 ```sh
-.venv/bin/python scrape.py --list
-.venv/bin/python scrape.py gratka --max-pages 1 --output data/gratka-preview.json
-.venv/bin/python scrape.py gratka --phones
+uv run python scrape.py --list
+uv run python scrape.py gratka --max-pages 1 --output data/gratka-preview.json
+uv run python scrape.py gratka --phones
 ```
 
 Ostatnia komenda importuje pełny wynik do istniejącej bazy; aplikacja pokazuje
@@ -102,9 +116,6 @@ ale nie zmienia bazy. Błędy pobierania i walidacji pozostawiają poprzednie da
 JSON jest zapisywany atomowo, osobno od transakcji SQLite; błąd zapisu JSON
 po imporcie nie cofa udanej transakcji bazy.
 
-Planowane pierwsze biuro: Świat Nieruchomości (`www.swiatnieruchomosci.pl`).
-**Konektor biura nie jest jeszcze zaimplementowany**: w środowisku cloud
-proxy odrzuca dostęp do strony. Domeny `swiatnieruchomosci.pl` oraz
-`www.swiatnieruchomosci.pl` dodano do szkicu ustawień sieciowych.
-Po zastosowaniu ustawień trzeba zbadać stronę i `robots.txt`, zaimplementować
-parser na podstawie rzeczywistych odpowiedzi oraz sprawdzić pobranie ofert.
+Moduły z PR #1 eksportujące `scrape() -> list[dict]` są nadal wykrywane pod nazwą modułu. Muszą zwracać kompletny wynik albo zgłaszać błąd. Obsługują kontakty w ramach pełnego pobrania; `--max-pages` wymaga nowego interfejsu `Connector`. Universum odrzuca wyniki przekraczające limit stron. Runner przyjmuje wiele źródeł (`uv run python scrape.py universum gratka`) i kontynuuje po błędzie pojedynczego źródła. `--output` jest dostępne tylko dla jednego źródła. Brak argumentów lub `--list` pokazuje listę konektorów.
+
+Konektor Świat Nieruchomości nie jest jeszcze zaimplementowany.
