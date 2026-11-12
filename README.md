@@ -64,3 +64,47 @@ uv run --with-requirements requirements.txt python -m unittest -v
 ```
 
 Covers the Adresowo scraper only; Gratka, the database and the web page have no automated tests yet.
+
+## Konektory źródeł
+
+Wspólny runner automatycznie wykrywa moduły w `connectors/`:
+
+```sh
+.venv/bin/python scrape.py --list
+.venv/bin/python scrape.py gratka --max-pages 1 --output data/gratka-preview.json
+.venv/bin/python scrape.py gratka --phones
+```
+
+Ostatnia komenda importuje pełny wynik do istniejącej bazy; aplikacja pokazuje
+oferty wszystkich źródeł. Dotychczasowe `scrape_gratka.py` nadal działa.
+Runner obsługuje również `--database FILE` do pracy na osobnej bazie.
+Pliki wynikowe zawierające kontakty zapisuj w ignorowanym `data/`.
+
+Dodanie biura:
+
+1. Utwórz `connectors/nazwa_biura.py`, eksportujący obiekt `connector`.
+2. Zaimplementuj interfejs `Connector` z `connectors/__init__.py`: stałe
+   `name`, `description` oraz `scrape(max_pages=None, phones=False)`.
+3. Zwróć `ScrapeResult(records, complete)`. Każdy rekord musi mieć stabilne
+   `id` i `url`; pozostałe pola mają format Gratki (`title`, `price_pln`,
+   `area_m2`, `rooms`, `location`, `image_url`, `description`, `agency`,
+   `agent`, `phone`). `name` jest trwałym kluczem źródła w SQLite.
+4. Ogranicz dane do **domów na sprzedaż w Szczecinie**, sprawdź paginację
+   i przypisuj telefon do właściwej oferty. `complete=True` oznacza, że
+   pobrano wszystkie strony tego zakresu. Limit stron, błąd pobrania lub
+   nierozpoznany HTML nie mogą oznaczać kompletnego przebiegu.
+5. Dodaj testy parsera oparte na rzeczywistym HTML oraz test paginacji.
+   Nowy moduł zostanie wykryty bez zmian runnera i bazy.
+
+Tylko kompletny, niepusty i poprawny wynik aktualizuje bazę oraz oznacza
+zniknięte oferty **danego źródła**. Przebieg częściowy może zapisać JSON,
+ale nie zmienia bazy. Błędy pobierania i walidacji pozostawiają poprzednie dane.
+JSON jest zapisywany atomowo, osobno od transakcji SQLite; błąd zapisu JSON
+po imporcie nie cofa udanej transakcji bazy.
+
+Planowane pierwsze biuro: Świat Nieruchomości (`www.swiatnieruchomosci.pl`).
+**Konektor biura nie jest jeszcze zaimplementowany**: w środowisku cloud
+proxy odrzuca dostęp do strony. Domeny `swiatnieruchomosci.pl` oraz
+`www.swiatnieruchomosci.pl` dodano do szkicu ustawień sieciowych.
+Po zastosowaniu ustawień trzeba zbadać stronę i `robots.txt`, zaimplementować
+parser na podstawie rzeczywistych odpowiedzi oraz sprawdzić pobranie ofert.
