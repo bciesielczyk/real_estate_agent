@@ -6,13 +6,17 @@ Usage: uv run python scrape.py universum     (several names allowed; no name = l
 import importlib
 import pkgutil
 import sys
+from pathlib import Path
 
 import connectors
 from db import save_listings
 
 
 def main():
-    available = sorted(module.name for module in pkgutil.iter_modules(connectors.__path__))
+    # Only modules that define scrape(); helpers such as llm_extract are not sites.
+    folder = Path(connectors.__path__[0])
+    available = sorted(m.name for m in pkgutil.iter_modules(connectors.__path__)
+                       if "def scrape(" in (folder / f"{m.name}.py").read_text(encoding="utf-8"))
     names = sys.argv[1:]
     if not names or set(names) - set(available):
         sys.exit(f"Usage: python scrape.py NAME...   Available connectors: {', '.join(available)}")
