@@ -333,7 +333,10 @@ def run_pending(path=db.DB_PATH, client=None):
         except anthropic.APIError as e:
             status, error = "failed", f"Błąd Claude API: {type(e).__name__}"
         except Exception as e:
-            status, error = "failed", f"Nieoczekiwany błąd: {type(e).__name__}"
+            if "api_key" in str(e) or "authentication" in str(e).lower():  # the SDK's "no key" errors
+                status, error = "failed", "Brak dostępu do Claude API (sprawdź ANTHROPIC_API_KEY)"
+            else:
+                status, error = "failed", f"Nieoczekiwany błąd: {type(e).__name__}"
         if status == "failed":
             try:
                 calls.update_call(call["source"], call["id"], path=path, status="failed", error=error)

@@ -8,9 +8,9 @@ Przepływ: konektory → baza → przeglądanie i filtr Claude'a → „do zadzw
 |---|---|
 | 1. Konektory agencji (`connectors/`, `scrape.py`) | zrobione dla Universum |
 | 2. Przeglądanie i filtr Claude'a (`app.py`, `matcher.py`) | było |
-| 3. Oznaczanie „do zadzwonienia” i pytania | zadanie A |
-| 4. Rozmowa telefoniczna (ElevenLabs) | zadanie B |
-| 5. Raport z rozmowy | zadania A (widok) i B (treść) |
+| 3. Oznaczanie „do zadzwonienia” i pytania | zrobione |
+| 4. Rozmowa telefoniczna (ElevenLabs) | symulacja działa na atrapie Claude API; ElevenLabs niesprawdzony na żywo |
+| 5. Raport z rozmowy | zrobione, niesprawdzone na prawdziwym modelu |
 
 ## Wspólny kontrakt (`calls.py`, gotowe)
 
