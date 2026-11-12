@@ -54,6 +54,11 @@ class UniversumTest(unittest.TestCase):
         self.assertIsNone(record["price_pln"])
         self.assertIsNone(record["phone"])
 
+    def test_offer_without_photo_has_no_image(self):
+        page = OFFER.replace('<a rel="prettyPhoto[gallery]" href="/gallery/1.jpg"><img src="/gallery/1.jpg" /></a>', "")
+        self.assertIn('<a href="#">', page)  # a later link must not be taken for the photo
+        self.assertIsNone(parse_offer(page, "UNI-DS-1")["image_url"])
+
     def test_page_without_details_is_an_error(self):
         with self.assertRaises(ValueError):
             parse_offer("<html>blocked</html>", "A-1")

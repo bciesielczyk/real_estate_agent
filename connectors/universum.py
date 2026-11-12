@@ -44,7 +44,7 @@ def parse_offer(page, code):
     details = {text(key).rstrip(":"): text(value) for key, value in
                re.findall(r"<th[^>]*>(.*?)</th>\s*<td[^>]*>(.*?)</td>", table.group(0), re.S)}
     agent = re.search(r'id="offerAgent".*?<b class="blue2">(.*?)</b>.*?tel\.\s*<b>(.*?)</b>', page, re.S)
-    image = re.search(r'id="mainThumb".*?href="([^"]+)"', page, re.S)
+    image = re.search(r'id="mainThumb">\s*<a[^>]*href="(/gallery/[^"]+)"', page)  # absent when no photo
     description = re.search(r"boxOpisOferty.*?<p>(.*?)</p>", page, re.S)
     district, kind = details.get("dzielnica - osiedle"), details.get("typ domu")
     rooms = number(details.get("liczba pokoi"))
