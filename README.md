@@ -10,8 +10,22 @@ Requires [uv](https://docs.astral.sh/uv/) and Python 3.10+.
 
 ```sh
 uv run python scrape_gratka.py --phones   # scrape Gratka into gratka_listings.json + listings.db
-uv run python app.py                      # open http://127.0.0.1:8000
+uv run python scrape.py universum         # add an agency site (see Connectors)
+uv run --with-requirements requirements.txt python app.py   # open http://127.0.0.1:8000
 ```
+
+## Connectors (`connectors/`, `scrape.py`) — agency sites
+
+A connector is one small module per site with a single `scrape()` function that returns a list of listing dicts (the contract is described in `connectors/__init__.py`). `scrape.py` runs it and stores the result in `listings.db` under the module's name:
+
+```sh
+uv run python scrape.py universum   # no name = list available connectors
+```
+
+- **Universum (`connectors/universum.py`)** — houses for sale in Szczecin from <https://www.universum.nieruchomosci.pl>. Plain HTTP, one request per second; reads each offer page for the full description, plot area, and the agent's name and phone. About 20 offers, under a minute.
+- To add a site, copy `universum.py`, adapt the parsing, and add a test like `test_universum.py`. If a scrape fails or finds nothing, the database is left untouched.
+
+Gratka still uses its own script (below) and is not a connector yet.
 
 ## Gratka scraper (`scrape_gratka.py`) — main source
 
@@ -45,7 +59,16 @@ Duplicates: the same house can appear under several IDs (re-posted, or listed by
 
 ## Web page (`app.py`, `static/index.html`)
 
-`uv run python app.py`, then open <http://127.0.0.1:8000>. Lists active listings as cards (photo, price, area, price per m², location, agent with phone, link) with sorting, a "new" badge for the last 2 days, and a toggle for listings that disappeared. Listens on `127.0.0.1` only, because the data contains phone numbers.
+`uv run --with-requirements requirements.txt python app.py`, then open <http://127.0.0.1:8000>. Lists active listings as cards (photo, price, area, price per m², location, agent with phone, link) with sorting, a "new" badge for the last 2 days, and a toggle for listings that disappeared. Listens on `127.0.0.1` only, because the data contains phone numbers.
+
+## Calls and reports (`calls.py`, `caller.py`)
+
+On a listing card, **Do zadzwonienia** queues the listing with a list of questions (five defaults, editable). The **Rozmowy** tab lists queued listings; **Zadzwoń do oznaczonych** runs the calls in the background and then shows, per listing, a summary, the answer to each question ("Nie ustalono" when the broker didn't say) and the transcript. From the command line: `uv run --with-requirements requirements.txt python caller.py`.
+
+- **Simulation (default):** no phone call is made. Claude writes a plausible conversation with the broker from the listing data, and a second request extracts the answers. Needs `ANTHROPIC_API_KEY`.
+- **Real calls (`CALL_MODE=real`):** an outbound call through an ElevenLabs Conversational AI agent with a Twilio number; needs `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID`. The agent's own prompt is set in the ElevenLabs dashboard; what it must contain is described at the top of `caller.py`. **Not yet tested against the real ElevenLabs API** — only against a mocked one.
+- The agent must say it is an AI and that the call is recorded. Brokers' numbers are personal data.
+- One call per listing; listings of the same broker are not combined into one call yet.
 
 ## Other sources (not in the MVP)
 
@@ -63,4 +86,4 @@ Duplicates: the same house can appear under several IDs (re-posted, or listed by
 uv run --with-requirements requirements.txt python -m unittest -v
 ```
 
-Covers the Adresowo scraper only; Gratka, the database and the web page have no automated tests yet.
+Covers the Adresowo scraper, the Universum connector, the database, the calls (with a fake Claude client and mocked ElevenLabs) and the calls API. Gratka and the Claude matcher have no automated tests yet.
