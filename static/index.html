@@ -7,6 +7,7 @@
 <style>
   :root { --bg:#f6f6f4; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e3df; --accent:#0b6e4f; }
   * { box-sizing: border-box; }
+  [hidden] { display:none !important; }
   body { margin:0; font:15px/1.45 system-ui, -apple-system, sans-serif; background:var(--bg); color:var(--ink); }
   header { position:sticky; top:0; z-index:1; background:var(--bg); border-bottom:1px solid var(--line);
            padding:14px 20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
@@ -38,6 +39,26 @@
   .why { background:#f0f6f3; border-left:3px solid var(--accent); padding:6px 10px; font-size:14px; border-radius:4px; }
   .score { font-weight:700; color:var(--accent); }
   #usage { color:var(--muted); font-size:12px; }
+  .badge.call { background:#fff3d6; color:#8a5a00; }
+  .badge.call.done { background:#e6f2ec; color:var(--accent); }
+  .badge.call.failed { background:#f3e3e3; color:#9b2c2c; }
+  .callbox { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+  .callbox textarea { font:inherit; font-size:13px; padding:8px; border:1px solid var(--line); border-radius:8px; min-height:130px; resize:vertical; }
+  .callbox .row, .tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  button.small { padding:4px 10px; font-size:13px; }
+  .tabs button { background:transparent; color:var(--accent); }
+  .tabs button.active { background:var(--accent); color:#fff; }
+  #calls { padding:20px; display:flex; flex-direction:column; gap:14px; max-width:900px; }
+  .callitem { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:6px; }
+  .callitem h3 { margin:0; font-size:16px; }
+  .callitem h3 a { color:inherit; }
+  .error { color:#9b2c2c; }
+  .warn { background:#f3e3e3; color:#9b2c2c; font-weight:700; padding:4px 10px; border-radius:6px; }
+  .qa { margin:4px 0 0; }
+  .qa .q { font-weight:600; }
+  .qa .a { margin:2px 0 8px 12px; border-left:3px solid var(--line); padding-left: 10px; }
+  details { margin-top: 4px; }
+  details p { margin:4px 0; }
 </style>
 </head>
 <body>
@@ -51,7 +72,12 @@
     <option value="ppm_asc">Cena za m² rosnąco</option>
   </select>
   <label><input type="checkbox" id="inactive"> pokaż zniknięte</label>
+  <div class="tabs">
+    <button type="button" id="tab-listings" class="active">Ogłoszenia</button>
+    <button type="button" id="tab-calls">Rozmowy <span id="callcount"></span></button>
+  </div>
 </header>
+<section id="calls" hidden></section>
 <form id="search">
   <textarea id="criteria" placeholder="Opisz, czego szukasz, np.: dom do 1,2 mln zł, min. 120 m², z ogrodem, w spokojnej okolicy, do zamieszkania od razu"></textarea>
   <div class="row">
@@ -109,7 +135,50 @@ function card(l) {
         l.active ? null : el("span", { className: "badge gone" }, "zniknęło"),
         el("span", {}, l.source),
         el("span", {}, "od " + new Date(l.first_seen).toLocaleDateString("pl-PL"))),
+      callControls(l),
     ));
+}
+
+const STATUS_PL = { to_call: "do zadzwonienia", calling: "w trakcie", done: "zakończona", failed: "nieudana" };
+let defaultQuestions = [];
+let editing = null; // "source:id" of the card whose question editor is open
+let callsData = { calls: [], mode: "simulate", running: false };
+let view = "listings", pollTimer = null;
+
+async function api(url, options) {
+  const response = await fetch(url, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || response.statusText);
+  return body;
+}
+
+function callControls(l) {
+  const key = l.source + ":" + l.id;
+  const box = el("div", { className: "callbox" });
+  const fail = el("span", { className: "error" });
+  const act = async fn => { try { await fn(); await load(); loadCalls(); } catch (e) { fail.textContent = "Błąd: " + e.message; } };
+  if (l.call_status) {
+    box.append(el("div", { className: "row" },
+      el("span", { className: "badge call " + l.call_status }, "Rozmowa: " + (STATUS_PL[l.call_status] || l.call_status)),
+      el("button", { className: "secondary small", textContent: "Usuń z listy", onclick: () =>
+        act(() => api(`/api/calls?source=${encodeURIComponent(l.source)}&id=${encodeURIComponent(l.id)}`, { method: "DELETE" })) })), fail);
+  } else if (!l.phone) {
+    box.append(el("button", { className: "secondary small", disabled: true, textContent: "Do zadzwonienia" }),
+      el("span", { className: "facts" }, "Brak numeru telefonu — nie można zadzwonić."));
+  } else if (editing === key) {
+    const area = el("textarea", { value: defaultQuestions.join("\n") });
+    box.append(el("label", {}, "Pytania do pośrednika (jedno w wierszu):"), area, el("div", { className: "row" },
+      el("button", { className: "small", textContent: "Zapisz", onclick: () => act(async () => {
+        const questions = area.value.split("\n").map(q => q.trim()).filter(Boolean);
+        await api("/api/calls", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: l.source, id: l.id, questions }) });
+        editing = null;
+      }) }),
+      el("button", { className: "secondary small", textContent: "Anuluj", onclick: () => { editing = null; render(); } })), fail);
+  } else {
+    box.append(el("button", { className: "secondary small", textContent: "Do zadzwonienia", onclick: () => { editing = key; render(); } }));
+  }
+  return box;
 }
 
 function render() {
@@ -158,6 +227,72 @@ document.getElementById("clear").addEventListener("click", () => {
   matches = null; summary.textContent = ""; usage.textContent = ""; document.getElementById("clear").hidden = true; render();
 });
 
+function callItem(c) {
+  const item = el("article", { className: "callitem" },
+    el("h3", {}, el("a", { href: c.url, target: "_blank", rel: "noopener" }, c.title || "Ogłoszenie")),
+    el("div", { className: "facts" }, [c.price_pln ? `${fmt.format(c.price_pln)} zł` : "Cena do negocjacji", c.location].filter(Boolean).join(" · ")),
+    el("div", {}, [c.agent, c.phone].filter(Boolean).join(", ") || "brak danych pośrednika"),
+    el("div", {}, el("span", { className: "badge call " + c.status }, STATUS_PL[c.status] || c.status)));
+  if (c.error) item.append(el("div", { className: "error" }, "Błąd: " + c.error));
+  if (c.report) {
+    item.append(el("div", {}, c.report.summary));
+    for (const a of c.report.answers || [])
+      item.append(el("div", { className: "qa" }, el("div", { className: "q" }, a.question), el("div", { className: "a" }, a.answer)));
+  } else {
+    item.append(el("div", { className: "facts" }, "Pytania: " + c.questions.join(" | ")));
+  }
+  if (c.transcript?.length)
+    item.append(el("details", {}, el("summary", {}, "Transkrypcja"),
+      ...c.transcript.map(t => el("p", {}, (t.role === "caller" ? "Agent AI: " : "Pośrednik: ") + t.text))));
+  return item;
+}
+
+function renderCalls() {
+  const { calls, mode, running } = callsData;
+  const pending = calls.filter(c => c.status === "to_call").length;
+  const busy = running || calls.some(c => c.status === "calling");
+  document.getElementById("callcount").textContent = `(${calls.length})`;
+  if (view !== "calls") return;
+  const real = mode === "real";
+  const go = el("button", { disabled: busy || !pending, textContent: busy ? "Rozmowy trwają…" : `Zadzwoń do oznaczonych (${pending})` });
+  const err = el("span", { className: "error" }, callsData.run_error ? "Nie udało się uruchomić rozmów: " + callsData.run_error : "");
+  go.onclick = async () => {
+    if (real && !confirm("Tryb PRAWDZIWE POŁĄCZENIA: agent AI zadzwoni do pośredników. Kontynuować?")) return;
+    go.disabled = true;
+    try { await api("/api/calls/run", { method: "POST" }); await loadCalls(); }
+    catch (e) { err.textContent = "Błąd: " + e.message; go.disabled = false; }
+  };
+  document.getElementById("calls").replaceChildren(
+    el("div", { className: "row tabs" }, go,
+      real ? el("span", { className: "warn" }, "tryb: PRAWDZIWE POŁĄCZENIA") : el("span", { className: "facts" }, "tryb: symulacja (bez prawdziwych połączeń)"), err),
+    ...(calls.length ? calls.map(callItem) : [el("p", { className: "facts" }, "Brak oznaczonych ogłoszeń. Użyj „Do zadzwonienia” na karcie ogłoszenia.")]));
+}
+
+async function loadCalls() {
+  clearTimeout(pollTimer);
+  try {
+    const data = await api("/api/calls");
+    defaultQuestions = data.default_questions;
+    callsData = data;
+    renderCalls();
+    if (view === "calls" && (data.running || data.calls.some(c => c.status === "calling"))) pollTimer = setTimeout(loadCalls, 3000);
+  } catch (error) {
+    if (view === "calls") document.getElementById("calls").prepend(el("p", { className: "error" }, "Nie udało się wczytać rozmów: " + error.message));
+  }
+}
+
+function setView(v) {
+  view = v;
+  clearTimeout(pollTimer);
+  document.getElementById("tab-listings").classList.toggle("active", v === "listings");
+  document.getElementById("tab-calls").classList.toggle("active", v === "calls");
+  for (const id of ["list", "search"]) document.getElementById(id).hidden = v === "calls";
+  document.getElementById("calls").hidden = v === "listings";
+  if (v === "calls") loadCalls(); else load();
+}
+document.getElementById("tab-listings").onclick = () => setView("listings");
+document.getElementById("tab-calls").onclick = () => setView("calls");
+
 async function load() {
   const inactive = document.getElementById("inactive").checked ? "1" : "0";
   try {
@@ -173,6 +308,7 @@ async function load() {
 document.getElementById("sort").addEventListener("change", render);
 document.getElementById("inactive").addEventListener("change", load);
 load();
+loadCalls();
 </script>
 </body>
 </html>
