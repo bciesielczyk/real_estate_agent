@@ -33,6 +33,7 @@ MAX_ITEMS = int(os.environ.get("OTODOM_MAX_ITEMS", 25))
 MAX_COST_USD = 0.25    # hard limit Apify enforces per run (pay-per-event stops charging at it)
 RUN_TIMEOUT_SECS = 600  # Apify aborts the run after this
 POLL_SECS = 5
+FREE_PLAN_CAP = 100    # the actor logs "This user is not paying - capped at 100 items" on free accounts
 WAIT_LIMIT_SECS = RUN_TIMEOUT_SECS + 60  # how long we wait before aborting the run ourselves
 
 
@@ -77,12 +78,14 @@ def run(max_items=None):
             raise TimeoutError(f"Apify run {run_id} still running after {WAIT_LIMIT_SECS} s; aborted it")
         time.sleep(POLL_SECS)
         started = api("GET", f"/actor-runs/{run_id}")["data"]
-    info = {"run_id": run_id, "status": started["status"], "cost_usd": started.get("usageTotalUsd"),
-            "seconds": started.get("stats", {}).get("runTimeSecs"), "charged": started.get("chargedEventCounts")}
-    print(f"Apify run {run_id}: {info['status']}, {info['seconds']} s, cost {info['cost_usd']} USD")
-    if info["status"] != "SUCCEEDED":
-        raise RuntimeError(f"Apify run {run_id} ended as {info['status']}: {started.get('statusMessage')}")
+    if started["status"] != "SUCCEEDED":
+        raise RuntimeError(f"Apify run {run_id} ended as {started['status']}: {started.get('statusMessage')}")
     items = api("GET", f"/datasets/{started['defaultDatasetId']}/items", {"format": "json", "clean": "true"})
+    time.sleep(POLL_SECS)  # the cost on the run object catches up a few seconds after SUCCEEDED
+    finished = api("GET", f"/actor-runs/{run_id}")["data"]
+    info = {"run_id": run_id, "status": finished["status"], "cost_usd": finished.get("usageTotalUsd"),
+            "seconds": finished.get("stats", {}).get("runTimeSecs"), "charged": finished.get("chargedEventCounts")}
+    print(f"Apify run {run_id}: {info['status']}, {info['seconds']} s, cost {info['cost_usd']} USD")
     return items, info
 
 
@@ -130,9 +133,10 @@ def parse_item(item):
 
 def scrape():
     items, info = run()
-    if len(items) >= MAX_ITEMS:
-        raise PartialScrape(f"Run {info['run_id']} returned {len(items)} items = MAX_ITEMS; the search is probably "
-                            f"not exhausted, so not saving it as a complete scrape. Raise MAX_ITEMS.")
+    if len(items) >= MAX_ITEMS or len(items) == FREE_PLAN_CAP:
+        raise PartialScrape(f"Run {info['run_id']} returned {len(items)} items (MAX_ITEMS={MAX_ITEMS}, the actor's "
+                            f"cap for free accounts is {FREE_PLAN_CAP}); the search is probably not exhausted, so "
+                            f"not saving it as a complete scrape.")
     return [parse_item(item) for item in items if item.get("listingId")]
 
 
